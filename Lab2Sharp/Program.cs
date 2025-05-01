@@ -9,102 +9,89 @@ namespace Lab2Sharp
 {
     class Program
     {
-        private static readonly int dim = 10_000_000;
-        private static readonly int threadNum = 12;
+        private static readonly int ArraySize = 100_000_000;
+        private static readonly int ThreadCount = 6;
 
-        private readonly Thread[] threads = new Thread[threadNum];
-        private readonly int[] arr = new int[dim];
+        private readonly int[] numbers = new int[ArraySize];
+        private readonly Thread[] workers = new Thread[ThreadCount];
 
         private int minValue = int.MaxValue;
         private int minIndex = -1;
+        private int finishedThreadCount = 0;
 
-        private int threadCount = 0;
-        private readonly object lockerForMin = new object();
-        private readonly object lockerForCount = new object();
+        private readonly object syncLock = new object();
 
         static void Main(string[] args)
         {
             Program program = new Program();
-            program.InitArray();
+            program.FillArray();
             program.FindMinParallel();
 
-            Console.WriteLine($"Мiнiмальне значення: {program.minValue}; Iндекс: {program.minIndex}");
+            Console.WriteLine($"Мiнiмальне значення: {program.minValue}");
+            Console.WriteLine($"Iндекс мiнiмального значення: {program.minIndex}");
             Console.ReadKey();
         }
 
-        private void InitArray()
+        private void FillArray()
         {
-            Random rnd = new Random();
-            for (int i = 0; i < dim; i++)
+            for (int i = 0; i < ArraySize; i++)
             {
-                arr[i] = rnd.Next(0, 1000);
+                numbers[i] = i;
             }
-            // Вставляємо від’ємне значення випадково
-            int randomIndex = new Random().Next(0, dim);
-            arr[randomIndex] = -rnd.Next(1, 100);
+
+            Random random = new Random();
+            int randomPosition = random.Next(0, ArraySize);
+            numbers[randomPosition] = -9999;
+
+            Console.WriteLine($"{randomPosition} --- value: {numbers[randomPosition]}");
         }
 
         private void FindMinParallel()
         {
-            int chunkSize = dim / threadNum;
-            for (int i = 0; i < threadNum; i++)
+            int chunkSize = ArraySize / ThreadCount;
+
+            for (int i = 0; i < ThreadCount; i++)
             {
                 int start = i * chunkSize;
-                int end = (i == threadNum - 1) ? dim : start + chunkSize;
+                int end = (i == ThreadCount - 1) ? ArraySize : start + chunkSize;
 
-                threads[i] = new Thread(MinWorker);
-                threads[i].Start(new Bound(start, end));
+                workers[i] = new Thread(() => FindLocalMin(start, end));
+                workers[i].Start();
             }
 
-            lock (lockerForCount)
+            lock (syncLock)
             {
-                while (threadCount < threadNum)
+                while (finishedThreadCount < ThreadCount)
                 {
-                    Monitor.Wait(lockerForCount);
-                }
-            }
-        }
-        private void MinWorker(object obj)
-        {
-            if (obj is Bound bounds)
-            {
-                int localMin = int.MaxValue;
-                int localIndex = -1;
-
-                for (int i = bounds.StartIndex; i < bounds.FinishIndex; i++)
-                {
-                    if (arr[i] < localMin)
-                    {
-                        localMin = arr[i];
-                        localIndex = i;
-                    }
-                }
-
-                lock (lockerForMin)
-                {
-                    if (localMin < minValue)
-                    {
-                        minValue = localMin;
-                        minIndex = localIndex;
-                    }
-                }
-
-                lock (lockerForCount)
-                {
-                    threadCount++;
-                    Monitor.Pulse(lockerForCount);
+                    Monitor.Wait(syncLock);
                 }
             }
         }
-        class Bound
-        {
-            public int StartIndex { get; }
-            public int FinishIndex { get; }
 
-            public Bound(int start, int end)
+        private void FindLocalMin(int start, int end)
+        {
+            int localMin = int.MaxValue;
+            int localMinPos = -1;
+
+            for (int i = start; i < end; i++)
             {
-                StartIndex = start;
-                FinishIndex = end;
+                if (numbers[i] < localMin)
+                {
+                    localMin = numbers[i];
+                    localMinPos = i;
+                }
+            }
+
+            lock (syncLock)
+            {
+                if (localMin < minValue)
+                {
+                    minValue = localMin;
+                    minIndex = localMinPos;
+                }
+
+                finishedThreadCount++;
+                Monitor.Pulse(syncLock);
             }
         }
     }
